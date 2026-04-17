@@ -1,0 +1,14 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(echo \"ANDROID_HOME: $ANDROID_HOME\")",
+      "Bash(echo \"JAVA_HOME: $JAVA_HOME\")",
+      "Bash(npm view *)",
+      "Bash(npm install *)",
+      "Bash(python .claude/skills/ui-ux-pro-max/scripts/search.py \"ambulance emergency medical healthcare booking mobile app trust urgent\" --design-system -p \"Ambulance App\")",
+      "Bash(npm uninstall *)",
+      "Bash(git config *)",
+      "Bash(git --version)"
+    ]
+  }
+}
