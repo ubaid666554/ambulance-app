@@ -95,13 +95,16 @@ function RoleCard({
   )
 }
 
-function RoleSelectionScreen({ navigation: _navigation }: Props) {
+function RoleSelectionScreen({ navigation }: Props) {
   const handleRoleSelect = (role: Role) => {
-    Alert.alert(
-      'Welcome Aboard',
-      `You've selected: ${role === 'patient' ? 'Patient' : 'Driver'}\n\nNext, we'll build the authentication flow.`,
-      [{ text: 'Continue', style: 'default' }],
-    )
+    if (role === 'driver') {
+      navigation.navigate('Login', { role: 'driver' })
+    } else {
+      Alert.alert(
+        'Coming Soon',
+        'Patient side is being built next. For now, try the Driver flow.',
+      )
+    }
   }
 
   return (
