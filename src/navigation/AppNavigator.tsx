@@ -9,7 +9,13 @@ import SplashScreen from '../screens/SplashScreen'
 import RoleSelectionScreen from '../screens/RoleSelectionScreen'
 import LoginScreen from '../screens/auth/LoginScreen'
 import DriverSignupScreen from '../screens/auth/DriverSignupScreen'
+import PatientSignupScreen from '../screens/auth/PatientSignupScreen'
 import DriverHomeScreen from '../screens/driver/DriverHomeScreen'
+import ActiveTripScreen from '../screens/driver/ActiveTripScreen'
+import PatientHomeScreen from '../screens/patient/PatientHomeScreen'
+import EditProfileScreen from '../screens/patient/EditProfileScreen'
+import RequestAmbulanceScreen from '../screens/patient/RequestAmbulanceScreen'
+import BookingStatusScreen from '../screens/patient/BookingStatusScreen'
 
 const Stack = createNativeStackNavigator<RootStackParamList>()
 
@@ -24,14 +30,30 @@ function AppNavigator() {
     )
   }
 
-  const isSignedInDriver =
-    user && profile && profile.role === 'driver'
+  const isSignedInDriver = user && profile && profile.role === 'driver'
+  const isSignedInPatient = user && profile && profile.role === 'patient'
 
   return (
     <NavigationContainer>
       <Stack.Navigator screenOptions={{ headerShown: false }}>
         {isSignedInDriver ? (
-          <Stack.Screen name="DriverHome" component={DriverHomeScreen} />
+          <>
+            <Stack.Screen name="DriverHome" component={DriverHomeScreen} />
+            <Stack.Screen name="ActiveTrip" component={ActiveTripScreen} />
+          </>
+        ) : isSignedInPatient ? (
+          <>
+            <Stack.Screen name="PatientHome" component={PatientHomeScreen} />
+            <Stack.Screen name="EditProfile" component={EditProfileScreen} />
+            <Stack.Screen
+              name="RequestAmbulance"
+              component={RequestAmbulanceScreen}
+            />
+            <Stack.Screen
+              name="BookingStatus"
+              component={BookingStatusScreen}
+            />
+          </>
         ) : (
           <>
             <Stack.Screen name="Splash" component={SplashScreen} />
@@ -43,6 +65,10 @@ function AppNavigator() {
             <Stack.Screen
               name="DriverSignup"
               component={DriverSignupScreen}
+            />
+            <Stack.Screen
+              name="PatientSignup"
+              component={PatientSignupScreen}
             />
           </>
         )}

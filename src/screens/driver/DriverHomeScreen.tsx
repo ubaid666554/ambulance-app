@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useState } from 'react'
 import {
   View,
   Text,
@@ -9,6 +9,9 @@ import {
   Alert,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
+import { useNavigation } from '@react-navigation/native'
+import { NativeStackNavigationProp } from '@react-navigation/native-stack'
+import { RootStackParamList } from '../../types/navigation'
 import { Colors } from '../../constants/colors'
 import {
   FontSize,
@@ -20,22 +23,62 @@ import {
 import {
   Siren,
   Car,
-  Star,
   CheckCircle,
   Clock,
   MapPin,
   LogOut,
+  Navigation,
+  FileText,
+  User,
 } from '../../components/Icons'
+import { StarRating } from '../../components/StarRating'
+import { Button } from '../../components/Button'
 import { useAuth } from '../../context/AuthContext'
 import { DriverProfile } from '../../types/user'
+import { Booking } from '../../types/booking'
 import { setDriverOnlineStatus } from '../../services/driver'
+import {
+  subscribeToPendingRequests,
+  subscribeToDriverActiveBooking,
+  acceptBooking,
+} from '../../services/booking'
+
+type NavProp = NativeStackNavigationProp<RootStackParamList>
 
 function DriverHomeScreen() {
-  const { profile, user, signOut } = useAuth()
+  const navigation = useNavigation<NavProp>()
+  const { user, profile, signOut } = useAuth()
   const driver = profile as DriverProfile | null
 
   const [isOnline, setIsOnline] = useState(driver?.isOnline ?? false)
   const [toggling, setToggling] = useState(false)
+  const [requests, setRequests] = useState<Booking[]>([])
+  const [acceptingId, setAcceptingId] = useState<string | null>(null)
+
+  useEffect(() => {
+    setIsOnline(driver?.isOnline ?? false)
+  }, [driver?.isOnline])
+
+  useEffect(() => {
+    if (!user) return
+
+    const unsub = subscribeToDriverActiveBooking(user.uid, booking => {
+      if (booking) {
+        navigation.navigate('ActiveTrip', { bookingId: booking.id })
+      }
+    })
+    return unsub
+  }, [user, navigation])
+
+  useEffect(() => {
+    if (!driver || !isOnline) {
+      setRequests([])
+      return
+    }
+
+    const unsub = subscribeToPendingRequests(driver.vehicleType, setRequests)
+    return unsub
+  }, [driver, isOnline])
 
   const handleToggleOnline = async (value: boolean) => {
     if (!user) return
@@ -43,10 +86,25 @@ function DriverHomeScreen() {
     try {
       await setDriverOnlineStatus(user.uid, value)
       setIsOnline(value)
-    } catch (error) {
+    } catch {
       Alert.alert('Error', 'Could not update status. Please try again.')
     } finally {
       setToggling(false)
+    }
+  }
+
+  const handleAccept = async (booking: Booking) => {
+    if (!driver) return
+    setAcceptingId(booking.id)
+    try {
+      await acceptBooking(booking.id, driver)
+    } catch (e: any) {
+      Alert.alert(
+        'Cannot accept',
+        e.message ?? 'Another driver may have accepted first',
+      )
+    } finally {
+      setAcceptingId(null)
     }
   }
 
@@ -138,9 +196,163 @@ function DriverHomeScreen() {
           </View>
         </View>
 
+        {isOnline ? (
+          <View style={styles.section}>
+            <View style={styles.sectionHeader}>
+              <Text style={styles.sectionTitle}>Incoming Requests</Text>
+              {requests.length > 0 ? (
+                <View style={styles.badge}>
+                  <Text style={styles.badgeText}>{requests.length}</Text>
+                </View>
+              ) : null}
+            </View>
+
+            {requests.length === 0 ? (
+              <View style={styles.emptyState}>
+                <View style={styles.emptyIcon}>
+                  <MapPin
+                    size={32}
+                    color={Colors.textTertiary}
+                    strokeWidth={2}
+                  />
+                </View>
+                <Text style={styles.emptyTitle}>Waiting for requests...</Text>
+                <Text style={styles.emptyText}>
+                  New emergency requests matching your {vehicleTypeLabel}{' '}
+                  ambulance will appear here in real-time.
+                </Text>
+              </View>
+            ) : (
+              <View style={styles.requestList}>
+                {requests.map(req => (
+                  <View key={req.id} style={styles.requestCard}>
+                    <View style={styles.requestHeader}>
+                      <View style={styles.requestAvatar}>
+                        <User
+                          size={20}
+                          color={Colors.patient}
+                          strokeWidth={2.5}
+                        />
+                      </View>
+                      <View style={styles.requestHeaderText}>
+                        <Text style={styles.requestName}>
+                          {req.patientName}
+                        </Text>
+                        <Text style={styles.requestPhone}>
+                          {req.patientPhone}
+                        </Text>
+                      </View>
+                      <View style={styles.requestTimeBadge}>
+                        <Clock
+                          size={12}
+                          color={Colors.warning}
+                          strokeWidth={2.5}
+                        />
+                        <Text style={styles.requestTimeText}>
+                          {timeSince(req.createdAt)}
+                        </Text>
+                      </View>
+                    </View>
+
+                    <View style={styles.requestDivider} />
+
+                    <View style={styles.requestRow}>
+                      <View
+                        style={[
+                          styles.requestIcon,
+                          { backgroundColor: Colors.primaryLight },
+                        ]}>
+                        <MapPin
+                          size={14}
+                          color={Colors.primary}
+                          strokeWidth={2.5}
+                        />
+                      </View>
+                      <Text style={styles.requestText} numberOfLines={2}>
+                        {req.pickupAddress}
+                      </Text>
+                    </View>
+
+                    <View style={styles.requestRow}>
+                      <View
+                        style={[
+                          styles.requestIcon,
+                          { backgroundColor: Colors.successLight },
+                        ]}>
+                        <Navigation
+                          size={14}
+                          color={Colors.success}
+                          strokeWidth={2.5}
+                        />
+                      </View>
+                      <Text style={styles.requestText} numberOfLines={2}>
+                        {req.destinationAddress}
+                      </Text>
+                    </View>
+
+                    {req.notes ? (
+                      <View style={styles.requestRow}>
+                        <View
+                          style={[
+                            styles.requestIcon,
+                            { backgroundColor: Colors.secondaryLight },
+                          ]}>
+                          <FileText
+                            size={14}
+                            color={Colors.secondary}
+                            strokeWidth={2.5}
+                          />
+                        </View>
+                        <Text style={styles.requestText} numberOfLines={3}>
+                          {req.notes}
+                        </Text>
+                      </View>
+                    ) : null}
+
+                    <Button
+                      title="Accept Request"
+                      onPress={() => handleAccept(req)}
+                      loading={acceptingId === req.id}
+                      variant="secondary"
+                      style={styles.acceptButton}
+                    />
+                  </View>
+                ))}
+              </View>
+            )}
+          </View>
+        ) : null}
+
+        <View style={styles.ratingCard}>
+          <View style={styles.ratingHeader}>
+            <Text style={styles.ratingLabel}>YOUR RATING</Text>
+            <Text style={styles.ratingCount}>
+              {driver.totalRatings ?? 0}{' '}
+              {(driver.totalRatings ?? 0) === 1 ? 'review' : 'reviews'}
+            </Text>
+          </View>
+          <View style={styles.ratingMainRow}>
+            <Text style={styles.ratingBigNumber}>
+              {(driver.rating ?? 0).toFixed(1)}
+            </Text>
+            <View style={styles.ratingStarsWrap}>
+              <StarRating value={driver.rating ?? 0} size={20} readonly />
+              <Text style={styles.ratingHint}>
+                {(driver.totalRatings ?? 0) === 0
+                  ? 'No ratings yet — complete trips to get rated'
+                  : 'Based on patient feedback'}
+              </Text>
+            </View>
+          </View>
+        </View>
+
         <View style={styles.statsRow}>
           <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: Colors.successLight }]}>
+            <View
+              style={[
+                styles.statIcon,
+                { backgroundColor: Colors.successLight },
+              ]}>
               <CheckCircle size={20} color={Colors.success} strokeWidth={2.5} />
             </View>
             <Text style={styles.statValue}>{driver.totalTrips}</Text>
@@ -148,15 +360,11 @@ function DriverHomeScreen() {
           </View>
 
           <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: Colors.primaryLight }]}>
-              <Star size={20} color={Colors.primary} strokeWidth={2.5} />
-            </View>
-            <Text style={styles.statValue}>{driver.rating.toFixed(1)}</Text>
-            <Text style={styles.statLabel}>Rating</Text>
-          </View>
-
-          <View style={styles.statCard}>
-            <View style={[styles.statIcon, { backgroundColor: Colors.secondaryLight }]}>
+            <View
+              style={[
+                styles.statIcon,
+                { backgroundColor: Colors.secondaryLight },
+              ]}>
               <Clock size={20} color={Colors.secondary} strokeWidth={2.5} />
             </View>
             <Text style={styles.statValue}>0</Text>
@@ -186,25 +394,18 @@ function DriverHomeScreen() {
             </View>
           </View>
         </View>
-
-        <View style={styles.section}>
-          <Text style={styles.sectionTitle}>Incoming Requests</Text>
-
-          <View style={styles.emptyState}>
-            <View style={styles.emptyIcon}>
-              <MapPin size={32} color={Colors.textTertiary} strokeWidth={2} />
-            </View>
-            <Text style={styles.emptyTitle}>No requests yet</Text>
-            <Text style={styles.emptyText}>
-              {isOnline
-                ? 'Patient requests will appear here in real-time'
-                : 'Go online to start receiving emergency requests'}
-            </Text>
-          </View>
-        </View>
       </ScrollView>
     </SafeAreaView>
   )
+}
+
+function timeSince(timestamp: number): string {
+  const seconds = Math.floor((Date.now() - timestamp) / 1000)
+  if (seconds < 60) return `${seconds}s ago`
+  const minutes = Math.floor(seconds / 60)
+  if (minutes < 60) return `${minutes}m ago`
+  const hours = Math.floor(minutes / 60)
+  return `${hours}h ago`
 }
 
 const styles = StyleSheet.create({
@@ -313,6 +514,163 @@ const styles = StyleSheet.create({
     fontWeight: FontWeight.semibold,
     color: Colors.textPrimary,
   },
+  section: {
+    marginBottom: Spacing.lg,
+  },
+  sectionHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  sectionTitle: {
+    fontSize: FontSize.lg,
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
+    letterSpacing: -0.3,
+  },
+  badge: {
+    backgroundColor: Colors.primary,
+    borderRadius: BorderRadius.full,
+    minWidth: 24,
+    height: 24,
+    paddingHorizontal: 8,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  badgeText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.textLight,
+  },
+  requestList: {
+    gap: Spacing.md,
+  },
+  requestCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    borderWidth: 1.5,
+    borderColor: Colors.primary,
+    ...Shadow.md,
+  },
+  requestHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  requestAvatar: {
+    width: 40,
+    height: 40,
+    borderRadius: BorderRadius.md,
+    backgroundColor: Colors.patientLight,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  requestHeaderText: {
+    flex: 1,
+  },
+  requestName: {
+    fontSize: FontSize.md,
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
+  },
+  requestPhone: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+  },
+  requestTimeBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 4,
+    backgroundColor: '#FEF3C7',
+    paddingHorizontal: 8,
+    paddingVertical: 4,
+    borderRadius: BorderRadius.full,
+  },
+  requestTimeText: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    color: Colors.warning,
+  },
+  requestDivider: {
+    height: 1,
+    backgroundColor: Colors.divider,
+    marginBottom: Spacing.sm,
+  },
+  requestRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: Spacing.sm,
+    marginBottom: Spacing.sm,
+  },
+  requestIcon: {
+    width: 28,
+    height: 28,
+    borderRadius: BorderRadius.sm,
+    justifyContent: 'center',
+    alignItems: 'center',
+    marginTop: 2,
+  },
+  requestText: {
+    flex: 1,
+    fontSize: FontSize.sm,
+    color: Colors.textPrimary,
+    fontWeight: FontWeight.medium,
+    lineHeight: 20,
+  },
+  acceptButton: {
+    marginTop: Spacing.sm,
+    ...Shadow.sm,
+  },
+  ratingCard: {
+    backgroundColor: Colors.surface,
+    borderRadius: BorderRadius.lg,
+    padding: Spacing.md,
+    marginBottom: Spacing.md,
+    borderWidth: 1,
+    borderColor: Colors.border,
+    ...Shadow.sm,
+  },
+  ratingHeader: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    alignItems: 'center',
+    marginBottom: Spacing.sm,
+  },
+  ratingLabel: {
+    fontSize: FontSize.xs,
+    fontWeight: FontWeight.bold,
+    color: Colors.textTertiary,
+    letterSpacing: 1,
+  },
+  ratingCount: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    fontWeight: FontWeight.semibold,
+  },
+  ratingMainRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.md,
+  },
+  ratingBigNumber: {
+    fontSize: FontSize.display,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.textPrimary,
+    letterSpacing: -1.5,
+    minWidth: 70,
+  },
+  ratingStarsWrap: {
+    flex: 1,
+    gap: 6,
+  },
+  ratingHint: {
+    fontSize: FontSize.xs,
+    color: Colors.textSecondary,
+    lineHeight: 16,
+  },
   statsRow: {
     flexDirection: 'row',
     gap: Spacing.sm,
@@ -345,16 +703,6 @@ const styles = StyleSheet.create({
     fontSize: FontSize.xs,
     color: Colors.textSecondary,
     fontWeight: FontWeight.medium,
-  },
-  section: {
-    marginBottom: Spacing.lg,
-  },
-  sectionTitle: {
-    fontSize: FontSize.lg,
-    fontWeight: FontWeight.bold,
-    color: Colors.textPrimary,
-    marginBottom: Spacing.md,
-    letterSpacing: -0.3,
   },
   vehicleCard: {
     flexDirection: 'row',
