@@ -26,6 +26,7 @@ export interface DriverProfile extends BaseUser {
   vehicleNumber: string
   isOnline: boolean
   rating: number
+  totalRatings: number
   totalTrips: number
   documents: DriverDocuments
   currentLocation?: {
@@ -35,8 +36,24 @@ export interface DriverProfile extends BaseUser {
   }
 }
 
+export type BloodGroup =
+  | 'A+'
+  | 'A-'
+  | 'B+'
+  | 'B-'
+  | 'O+'
+  | 'O-'
+  | 'AB+'
+  | 'AB-'
+  | 'Unknown'
+
 export interface PatientProfile extends BaseUser {
   role: 'patient'
+  bloodGroup?: BloodGroup
+  cnic?: string
+  profilePhotoUri?: string
+  emergencyContactName?: string
+  emergencyContactPhone?: string
 }
 
 export type UserProfile = DriverProfile | PatientProfile

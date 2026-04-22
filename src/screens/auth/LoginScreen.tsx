@@ -27,28 +27,49 @@ import {
   Lock,
   Siren,
   HeartPulse,
+  Phone,
 } from '../../components/Icons'
-import { signIn, getFriendlyAuthError } from '../../services/auth'
+import {
+  signIn,
+  signInDriverWithPhone,
+  getFriendlyAuthError,
+} from '../../services/auth'
+import {
+  formatPakistanPhone,
+  validatePakistanPhone,
+} from '../../utils/validators'
 
 type Props = NativeStackScreenProps<RootStackParamList, 'Login'>
 
 function LoginScreen({ navigation, route }: Props) {
   const { role } = route.params
+  const isDriver = role === 'driver'
 
-  const [email, setEmail] = useState('')
+  const [emailOrPhone, setEmailOrPhone] = useState('')
   const [password, setPassword] = useState('')
-  const [errors, setErrors] = useState<{ email?: string; password?: string }>({})
+  const [errors, setErrors] = useState<{
+    emailOrPhone?: string
+    password?: string
+  }>({})
   const [loading, setLoading] = useState(false)
   const [submitError, setSubmitError] = useState<string | null>(null)
 
-  const roleColor = role === 'driver' ? Colors.driver : Colors.patient
-  const roleBg = role === 'driver' ? Colors.driverLight : Colors.patientLight
+  const roleColor = isDriver ? Colors.driver : Colors.patient
+  const roleBg = isDriver ? Colors.driverLight : Colors.patientLight
 
   const validate = () => {
     const newErrors: typeof errors = {}
-    if (!email.trim()) newErrors.email = 'Email is required'
-    else if (!/^\S+@\S+\.\S+$/.test(email))
-      newErrors.email = 'Enter a valid email'
+
+    if (!emailOrPhone.trim()) {
+      newErrors.emailOrPhone = isDriver
+        ? 'Phone number is required'
+        : 'Email is required'
+    } else if (isDriver) {
+      const phoneErr = validatePakistanPhone(emailOrPhone)
+      if (phoneErr) newErrors.emailOrPhone = phoneErr
+    } else if (!/^\S+@\S+\.\S+$/.test(emailOrPhone)) {
+      newErrors.emailOrPhone = 'Enter a valid email'
+    }
 
     if (!password) newErrors.password = 'Password is required'
     else if (password.length < 6)
@@ -64,7 +85,11 @@ function LoginScreen({ navigation, route }: Props) {
 
     setLoading(true)
     try {
-      await signIn(email, password)
+      if (isDriver) {
+        await signInDriverWithPhone(emailOrPhone, password)
+      } else {
+        await signIn(emailOrPhone, password)
+      }
     } catch (error: any) {
       setSubmitError(getFriendlyAuthError(error.code))
     } finally {
@@ -73,10 +98,18 @@ function LoginScreen({ navigation, route }: Props) {
   }
 
   const handleSignupPress = () => {
-    if (role === 'driver') {
+    if (isDriver) {
       navigation.navigate('DriverSignup')
     } else {
-      Alert.alert('Coming Soon', 'Patient signup will be built next')
+      navigation.navigate('PatientSignup')
+    }
+  }
+
+  const handleEmailOrPhoneChange = (value: string) => {
+    if (isDriver) {
+      setEmailOrPhone(formatPakistanPhone(value))
+    } else {
+      setEmailOrPhone(value)
     }
   }
 
@@ -98,7 +131,7 @@ function LoginScreen({ navigation, route }: Props) {
           </Pressable>
 
           <View style={[styles.iconBadge, { backgroundColor: roleBg }]}>
-            {role === 'driver' ? (
+            {isDriver ? (
               <Siren size={36} color={roleColor} strokeWidth={2.5} />
             ) : (
               <HeartPulse size={36} color={roleColor} strokeWidth={2.5} />
@@ -112,15 +145,21 @@ function LoginScreen({ navigation, route }: Props) {
 
           <View style={styles.form}>
             <Input
-              label="Email"
-              placeholder="you@example.com"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
+              label={isDriver ? 'Phone Number' : 'Email'}
+              placeholder={isDriver ? '+92 300 1234567' : 'you@example.com'}
+              value={emailOrPhone}
+              onChangeText={handleEmailOrPhoneChange}
+              keyboardType={isDriver ? 'phone-pad' : 'email-address'}
               autoCapitalize="none"
-              autoComplete="email"
-              error={errors.email}
-              icon={<Mail size={20} color={Colors.textTertiary} />}
+              autoComplete={isDriver ? 'tel' : 'email'}
+              error={errors.emailOrPhone}
+              icon={
+                isDriver ? (
+                  <Phone size={20} color={Colors.textTertiary} />
+                ) : (
+                  <Mail size={20} color={Colors.textTertiary} />
+                )
+              }
             />
 
             <Input

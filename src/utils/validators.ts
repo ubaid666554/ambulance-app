@@ -41,6 +41,19 @@ export function formatPakistanPhone(input: string): string {
   return `+92 ${digits.slice(0, 3)} ${digits.slice(3)}`
 }
 
+export function normalizePakistanPhone(input: string): string {
+  let digits = input.replace(/\D/g, '')
+  if (digits.startsWith('92')) return `+${digits}`
+  if (digits.startsWith('0')) return `+92${digits.slice(1)}`
+  if (digits.length === 10) return `+92${digits}`
+  return `+${digits}`
+}
+
+export function phoneToFakeEmail(phone: string): string {
+  const normalized = phone.replace(/\D/g, '')
+  return `${normalized}@medirush.app`
+}
+
 export function validatePakistanPhone(value: string): string | null {
   const digits = value.replace(/\D/g, '')
   if (!digits) return 'Phone number is required'

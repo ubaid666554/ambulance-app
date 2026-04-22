@@ -4,7 +4,6 @@ import {
   Text,
   StyleSheet,
   Pressable,
-  Alert,
   Animated,
   ScrollView,
 } from 'react-native'
@@ -97,14 +96,7 @@ function RoleCard({
 
 function RoleSelectionScreen({ navigation }: Props) {
   const handleRoleSelect = (role: Role) => {
-    if (role === 'driver') {
-      navigation.navigate('Login', { role: 'driver' })
-    } else {
-      Alert.alert(
-        'Coming Soon',
-        'Patient side is being built next. For now, try the Driver flow.',
-      )
-    }
+    navigation.navigate('Login', { role })
   }
 
   return (

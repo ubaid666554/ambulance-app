@@ -1,4 +1,4 @@
-import React, { useState } from 'react'
+import React, { useEffect, useRef, useState } from 'react'
 import {
   View,
   Text,
@@ -8,6 +8,7 @@ import {
   Platform,
   Pressable,
   Alert,
+  TextInput,
 } from 'react-native'
 import { SafeAreaView } from 'react-native-safe-area-context'
 import { NativeStackScreenProps } from '@react-navigation/native-stack'
@@ -27,7 +28,6 @@ import { PhotoUpload } from '../../components/PhotoUpload'
 import { StepIndicator } from '../../components/StepIndicator'
 import {
   ArrowLeft,
-  Mail,
   Lock,
   User,
   Phone,
@@ -35,12 +35,19 @@ import {
   Car,
   Siren,
   ChevronRight,
+  CheckCircle,
 } from '../../components/Icons'
-import { signUpDriver, getFriendlyAuthError } from '../../services/auth'
+import {
+  completeDriverSignup,
+  sendOtpToPhone,
+  verifyOtp,
+  getFriendlyAuthError,
+  OtpConfirmation,
+} from '../../services/auth'
 import { useAuth } from '../../context/AuthContext'
+import auth from '@react-native-firebase/auth'
 import {
   validateName,
-  validateEmail,
   validatePassword,
   validateConfirmPassword,
   validatePakistanPhone,
@@ -54,10 +61,11 @@ import {
 
 type Props = NativeStackScreenProps<RootStackParamList, 'DriverSignup'>
 
-const TOTAL_STEPS = 5
+const TOTAL_STEPS = 6
 const STEP_LABELS = [
-  'Personal Info',
-  'Security',
+  'Phone Number',
+  'Verify OTP',
+  'Account Details',
   'Identity',
   'License',
   'Vehicle',
@@ -73,15 +81,19 @@ const VEHICLE_TYPES: {
   { key: 'cardiac', label: 'Cardiac', description: 'Heart emergencies' },
 ]
 
+const RESEND_SECONDS = 60
+
 function DriverSignupScreen({ navigation }: Props) {
   const { setSignupPending } = useAuth()
 
   const [step, setStep] = useState(1)
 
-  const [name, setName] = useState('')
-  const [email, setEmail] = useState('')
   const [phone, setPhone] = useState('')
+  const [confirmation, setConfirmation] = useState<OtpConfirmation | null>(null)
+  const [otp, setOtp] = useState('')
+  const [resendSeconds, setResendSeconds] = useState(0)
 
+  const [name, setName] = useState('')
   const [password, setPassword] = useState('')
   const [confirmPassword, setConfirmPassword] = useState('')
 
@@ -100,32 +112,97 @@ function DriverSignupScreen({ navigation }: Props) {
   const [submitError, setSubmitError] = useState<string | null>(null)
   const [loading, setLoading] = useState(false)
 
+  const otpRefs = useRef<Array<TextInput | null>>([])
+
   const passwordStrength = getPasswordStrength(password)
+
+  useEffect(() => {
+    if (resendSeconds <= 0) return
+    const t = setTimeout(() => setResendSeconds(s => s - 1), 1000)
+    return () => clearTimeout(t)
+  }, [resendSeconds])
 
   const setError = (key: string, err: string | null) =>
     setErrors(prev => ({ ...prev, [key]: err }))
 
+  const handleSendOtp = async () => {
+    setSubmitError(null)
+    const err = validatePakistanPhone(phone)
+    if (err) {
+      setError('phone', err)
+      return
+    }
+    setLoading(true)
+    setSignupPending(true)
+    try {
+      const conf = await sendOtpToPhone(phone)
+      setConfirmation(conf)
+      setResendSeconds(RESEND_SECONDS)
+      setOtp('')
+      setStep(2)
+    } catch (error: any) {
+      setSubmitError(getFriendlyAuthError(error.code))
+      setSignupPending(false)
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleResendOtp = async () => {
+    if (resendSeconds > 0) return
+    setLoading(true)
+    try {
+      const conf = await sendOtpToPhone(phone)
+      setConfirmation(conf)
+      setResendSeconds(RESEND_SECONDS)
+      setOtp('')
+    } catch (error: any) {
+      setSubmitError(getFriendlyAuthError(error.code))
+    } finally {
+      setLoading(false)
+    }
+  }
+
+  const handleVerifyOtp = async () => {
+    setSubmitError(null)
+    if (otp.length !== 6) {
+      setError('otp', 'Enter the full 6-digit OTP')
+      return
+    }
+    if (!confirmation) {
+      setSubmitError('OTP session expired. Please go back and resend.')
+      return
+    }
+
+    setLoading(true)
+    try {
+      await verifyOtp(confirmation, otp)
+      setStep(3)
+    } catch (error: any) {
+      setSubmitError(getFriendlyAuthError(error.code))
+    } finally {
+      setLoading(false)
+    }
+  }
+
   const validateStep = (current: number): boolean => {
     const newErrors: Record<string, string | null> = {}
 
-    if (current === 1) {
+    if (current === 3) {
       newErrors.name = validateName(name)
-      newErrors.email = validateEmail(email)
-      newErrors.phone = validatePakistanPhone(phone)
-    } else if (current === 2) {
       newErrors.password = validatePassword(password)
       newErrors.confirmPassword = validateConfirmPassword(
         password,
         confirmPassword,
       )
-    } else if (current === 3) {
+    } else if (current === 4) {
       newErrors.cnic = validateCNIC(cnic)
       if (!cnicPhoto) newErrors.cnicPhoto = 'CNIC photo is required'
       if (!profilePhoto) newErrors.profilePhoto = 'Profile photo is required'
-    } else if (current === 4) {
+    } else if (current === 5) {
       newErrors.licenseNumber = validateLicenseNumber(licenseNumber)
       if (!licensePhoto) newErrors.licensePhoto = 'License photo is required'
-    } else if (current === 5) {
+    } else if (current === 6) {
       newErrors.vehicleNumber = validateVehicleNumber(vehicleNumber)
       if (!vehicleRegPhoto)
         newErrors.vehicleRegPhoto = 'Registration photo is required'
@@ -136,28 +213,42 @@ function DriverSignupScreen({ navigation }: Props) {
   }
 
   const goNext = () => {
+    if (step === 1) {
+      handleSendOtp()
+      return
+    }
+    if (step === 2) {
+      handleVerifyOtp()
+      return
+    }
     if (!validateStep(step)) return
     setStep(s => Math.min(s + 1, TOTAL_STEPS))
   }
 
-  const goBack = () => {
+  const goBack = async () => {
     if (step === 1) {
       navigation.goBack()
-    } else {
-      setStep(s => s - 1)
+      return
     }
+    if (step === 3 || step === 4 || step === 5 || step === 6) {
+      if (step === 3 && auth().currentUser) {
+        try {
+          await auth().signOut()
+        } catch {}
+        setConfirmation(null)
+      }
+    }
+    setStep(s => s - 1)
   }
 
   const handleSubmit = async () => {
     setSubmitError(null)
-    if (!validateStep(5)) return
+    if (!validateStep(6)) return
 
     setLoading(true)
-    setSignupPending(true)
     try {
-      await signUpDriver({
+      await completeDriverSignup({
         name,
-        email,
         phone,
         password,
         cnic,
@@ -173,7 +264,7 @@ function DriverSignupScreen({ navigation }: Props) {
       setLoading(false)
       Alert.alert(
         'Account Created',
-        'Your driver account is ready. Please sign in to continue.',
+        'Your driver account is ready. Please sign in with your phone and password.',
         [
           {
             text: 'Sign In',
@@ -186,10 +277,17 @@ function DriverSignupScreen({ navigation }: Props) {
         { cancelable: false },
       )
     } catch (error: any) {
-      setSignupPending(false)
-      setSubmitError(getFriendlyAuthError(error.code))
+      setSubmitError(
+        error.message ?? getFriendlyAuthError(error.code) ?? 'Signup failed',
+      )
       setLoading(false)
     }
+  }
+
+  const handleOtpChange = (value: string) => {
+    const cleaned = value.replace(/\D/g, '').slice(0, 6)
+    setOtp(cleaned)
+    if (errors.otp) setError('otp', null)
   }
 
   const renderStep = () => {
@@ -197,9 +295,81 @@ function DriverSignupScreen({ navigation }: Props) {
       case 1:
         return (
           <View>
-            <Text style={styles.sectionTitle}>Tell us about yourself</Text>
+            <Text style={styles.sectionTitle}>Enter your phone number</Text>
             <Text style={styles.sectionHint}>
-              We'll use this information to create your driver profile
+              We'll send a 6-digit code to verify your number. You'll use this
+              number to sign in.
+            </Text>
+
+            <Input
+              label="Phone Number"
+              placeholder="+92 300 1234567"
+              value={phone}
+              onChangeText={v => setPhone(formatPakistanPhone(v))}
+              keyboardType="phone-pad"
+              error={errors.phone ?? undefined}
+              icon={<Phone size={20} color={Colors.textTertiary} />}
+              autoFocus
+            />
+          </View>
+        )
+
+      case 2:
+        return (
+          <View>
+            <Text style={styles.sectionTitle}>Verify your phone</Text>
+            <Text style={styles.sectionHint}>
+              Enter the 6-digit code we sent to{' '}
+              <Text style={styles.phoneStrong}>{phone}</Text>
+            </Text>
+
+            <View style={styles.otpRow}>
+              {Array.from({ length: 6 }).map((_, i) => (
+                <View
+                  key={i}
+                  style={[
+                    styles.otpBox,
+                    otp[i] && styles.otpBoxFilled,
+                    errors.otp && styles.otpBoxError,
+                  ]}>
+                  <Text style={styles.otpDigit}>{otp[i] ?? ''}</Text>
+                </View>
+              ))}
+            </View>
+
+            <TextInput
+              style={styles.otpHiddenInput}
+              value={otp}
+              onChangeText={handleOtpChange}
+              keyboardType="number-pad"
+              maxLength={6}
+              autoFocus
+              caretHidden
+            />
+
+            {errors.otp ? (
+              <Text style={styles.otpError}>{errors.otp}</Text>
+            ) : null}
+
+            <View style={styles.resendRow}>
+              <Text style={styles.resendText}>Didn't receive code?</Text>
+              {resendSeconds > 0 ? (
+                <Text style={styles.resendTimer}>Resend in {resendSeconds}s</Text>
+              ) : (
+                <Pressable onPress={handleResendOtp} hitSlop={8}>
+                  <Text style={styles.resendLink}>Resend OTP</Text>
+                </Pressable>
+              )}
+            </View>
+          </View>
+        )
+
+      case 3:
+        return (
+          <View>
+            <Text style={styles.sectionTitle}>Create your account</Text>
+            <Text style={styles.sectionHint}>
+              Tell us your name and set a password
             </Text>
 
             <Input
@@ -213,42 +383,8 @@ function DriverSignupScreen({ navigation }: Props) {
             />
 
             <Input
-              label="Email"
-              placeholder="you@gmail.com"
-              value={email}
-              onChangeText={setEmail}
-              keyboardType="email-address"
-              autoCapitalize="none"
-              autoComplete="email"
-              error={errors.email ?? undefined}
-              helperText="Use Gmail, Yahoo, Outlook, or similar"
-              icon={<Mail size={20} color={Colors.textTertiary} />}
-            />
-
-            <Input
-              label="Phone Number"
-              placeholder="+92 300 1234567"
-              value={phone}
-              onChangeText={v => setPhone(formatPakistanPhone(v))}
-              keyboardType="phone-pad"
-              error={errors.phone ?? undefined}
-              helperText="Pakistan mobile (starts with 3)"
-              icon={<Phone size={20} color={Colors.textTertiary} />}
-            />
-          </View>
-        )
-
-      case 2:
-        return (
-          <View>
-            <Text style={styles.sectionTitle}>Create a strong password</Text>
-            <Text style={styles.sectionHint}>
-              At least 8 characters with uppercase, lowercase, and a number
-            </Text>
-
-            <Input
               label="Password"
-              placeholder="Enter password"
+              placeholder="Min. 8 chars with A-Z, a-z, 0-9"
               value={password}
               onChangeText={setPassword}
               isPassword
@@ -293,7 +429,7 @@ function DriverSignupScreen({ navigation }: Props) {
           </View>
         )
 
-      case 3:
+      case 4:
         return (
           <View>
             <Text style={styles.sectionTitle}>Identity verification</Text>
@@ -337,7 +473,7 @@ function DriverSignupScreen({ navigation }: Props) {
           </View>
         )
 
-      case 4:
+      case 5:
         return (
           <View>
             <Text style={styles.sectionTitle}>Driving license</Text>
@@ -369,7 +505,7 @@ function DriverSignupScreen({ navigation }: Props) {
           </View>
         )
 
-      case 5:
+      case 6:
         return (
           <View>
             <Text style={styles.sectionTitle}>Vehicle details</Text>
@@ -435,6 +571,15 @@ function DriverSignupScreen({ navigation }: Props) {
   }
 
   const isLastStep = step === TOTAL_STEPS
+  const primaryTitle =
+    step === 1
+      ? 'Send OTP'
+      : step === 2
+      ? 'Verify'
+      : isLastStep
+      ? 'Create Driver Account'
+      : 'Continue'
+  const onPrimary = isLastStep ? handleSubmit : goNext
 
   return (
     <SafeAreaView style={styles.container} edges={['top', 'bottom']}>
@@ -476,24 +621,27 @@ function DriverSignupScreen({ navigation }: Props) {
           ) : null}
 
           <Button
-            title={isLastStep ? 'Create Driver Account' : 'Continue'}
-            onPress={isLastStep ? handleSubmit : goNext}
+            title={primaryTitle}
+            onPress={onPrimary}
             loading={loading}
             variant="secondary"
             iconRight={
-              !isLastStep && !loading ? (
-                <ChevronRight size={20} color={Colors.textLight} strokeWidth={2.5} />
+              !isLastStep && step > 2 && !loading ? (
+                <ChevronRight
+                  size={20}
+                  color={Colors.textLight}
+                  strokeWidth={2.5}
+                />
+              ) : step === 2 && !loading ? (
+                <CheckCircle
+                  size={20}
+                  color={Colors.textLight}
+                  strokeWidth={2.5}
+                />
               ) : undefined
             }
             style={styles.submitButton}
           />
-
-          {isLastStep ? (
-            <Text style={styles.terms}>
-              By creating an account, you agree to our Terms of Service and
-              Privacy Policy
-            </Text>
-          ) : null}
 
           {step === 1 ? (
             <View style={styles.footer}>
@@ -506,6 +654,13 @@ function DriverSignupScreen({ navigation }: Props) {
                 <Text style={styles.footerLink}> Sign in</Text>
               </Pressable>
             </View>
+          ) : null}
+
+          {isLastStep ? (
+            <Text style={styles.terms}>
+              By creating an account, you agree to our Terms of Service and
+              Privacy Policy
+            </Text>
           ) : null}
         </ScrollView>
       </KeyboardAvoidingView>
@@ -569,12 +724,78 @@ const styles = StyleSheet.create({
     marginBottom: Spacing.lg,
     lineHeight: 20,
   },
+  phoneStrong: {
+    fontWeight: FontWeight.bold,
+    color: Colors.textPrimary,
+  },
   fieldLabel: {
     fontSize: FontSize.sm,
     fontWeight: FontWeight.semibold,
     color: Colors.textPrimary,
     marginTop: Spacing.xs,
     marginBottom: Spacing.sm,
+  },
+  otpRow: {
+    flexDirection: 'row',
+    justifyContent: 'space-between',
+    gap: Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  otpBox: {
+    flex: 1,
+    height: 56,
+    borderRadius: BorderRadius.md,
+    borderWidth: 1.5,
+    borderColor: Colors.border,
+    backgroundColor: Colors.surface,
+    justifyContent: 'center',
+    alignItems: 'center',
+  },
+  otpBoxFilled: {
+    borderColor: Colors.driver,
+    backgroundColor: Colors.driverLight,
+  },
+  otpBoxError: {
+    borderColor: Colors.danger,
+  },
+  otpDigit: {
+    fontSize: FontSize.xxl,
+    fontWeight: FontWeight.extrabold,
+    color: Colors.textPrimary,
+  },
+  otpHiddenInput: {
+    position: 'absolute',
+    opacity: 0,
+    width: 1,
+    height: 1,
+  },
+  otpError: {
+    fontSize: FontSize.sm,
+    color: Colors.danger,
+    textAlign: 'center',
+    marginTop: -Spacing.sm,
+    marginBottom: Spacing.md,
+  },
+  resendRow: {
+    flexDirection: 'row',
+    justifyContent: 'center',
+    alignItems: 'center',
+    gap: 6,
+    marginTop: Spacing.sm,
+  },
+  resendText: {
+    fontSize: FontSize.sm,
+    color: Colors.textSecondary,
+  },
+  resendTimer: {
+    fontSize: FontSize.sm,
+    color: Colors.textTertiary,
+    fontWeight: FontWeight.semibold,
+  },
+  resendLink: {
+    fontSize: FontSize.sm,
+    color: Colors.driver,
+    fontWeight: FontWeight.bold,
   },
   strengthRow: {
     flexDirection: 'row',
