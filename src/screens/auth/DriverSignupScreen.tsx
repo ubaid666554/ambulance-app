@@ -141,7 +141,12 @@ function DriverSignupScreen({ navigation }: Props) {
       setOtp('')
       setStep(2)
     } catch (error: any) {
-      setSubmitError(getFriendlyAuthError(error.code))
+      const friendly = getFriendlyAuthError(error.code)
+      setSubmitError(
+        friendly === 'Something went wrong. Please try again'
+          ? `${error.message ?? 'OTP failed'} (${error.code ?? 'no code'})`
+          : friendly,
+      )
       setSignupPending(false)
     } finally {
       setLoading(false)

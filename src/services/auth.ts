@@ -16,8 +16,17 @@ export type OtpConfirmation =
 
 export async function sendOtpToPhone(phone: string): Promise<OtpConfirmation> {
   const normalized = normalizePakistanPhone(phone)
-  const confirmation = await auth().signInWithPhoneNumber(normalized)
-  return confirmation
+  console.log('[OTP] Sending to:', normalized)
+  try {
+    const confirmation = await auth().signInWithPhoneNumber(normalized)
+    console.log('[OTP] Sent successfully')
+    return confirmation
+  } catch (error: any) {
+    console.log('[OTP] Error code:', error?.code)
+    console.log('[OTP] Error message:', error?.message)
+    console.log('[OTP] Full error:', JSON.stringify(error))
+    throw error
+  }
 }
 
 export async function verifyOtp(
